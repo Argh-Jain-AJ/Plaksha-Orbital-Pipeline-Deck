@@ -2,28 +2,19 @@
 
 import { useState } from "react";
 import { Play, StepForward, RotateCcw, Plus, Calculator, Server } from "lucide-react";
-
-type InstructionType = "ADD" | "SUB" | "LW" | "SW" | "";
-
-interface Instruction {
-  id: number;
-  type: InstructionType;
-  rd: string;
-  rs1: string;
-  rs2: string;
-  offset: string;
-}
+import { RawInstruction, Hazard, InstructionType, parseInstructions, detectRAW } from "@/lib/hazardDetection";
 
 export default function PipelineDeck() {
   const [numInstructionsInput, setNumInstructionsInput] = useState<string>("5");
-  const [instructions, setInstructions] = useState<Instruction[]>([]);
+  const [instructions, setInstructions] = useState<RawInstruction[]>([]);
   const [pipelineType, setPipelineType] = useState<"4-stage" | "5-stage">("5-stage");
   const [forwardingEnabled, setForwardingEnabled] = useState<boolean>(true);
+  const [hazards, setHazards] = useState<Hazard[] | null>(null);
 
   const generateInstructions = () => {
     const num = parseInt(numInstructionsInput);
     if (!isNaN(num) && num >= 1 && num <= 10) {
-      const newInstructions: Instruction[] = Array.from({ length: num }).map((_, i) => ({
+      const newInstructions: RawInstruction[] = Array.from({ length: num }).map((_, i) => ({
         id: i + 1,
         type: "ADD",
         rd: "",
@@ -37,8 +28,14 @@ export default function PipelineDeck() {
     }
   };
 
-  const updateInstruction = (id: number, field: keyof Instruction, value: string) => {
+  const updateInstruction = (id: number, field: keyof RawInstruction, value: string) => {
     setInstructions(instructions.map(inst => inst.id === id ? { ...inst, [field]: value } : inst));
+  };
+
+  const handleRunSimulation = () => {
+    const parsed = parseInstructions(instructions);
+    const detectedHazards = detectRAW(parsed);
+    setHazards(detectedHazards);
   };
 
   return (
@@ -116,7 +113,7 @@ export default function PipelineDeck() {
                 </label>
 
                 <div className="pt-2 grid grid-cols-2 gap-2">
-                  <button className="col-span-2 bg-slate-800 hover:bg-slate-900 text-white font-medium py-2 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors text-sm shadow-sm">
+                  <button onClick={handleRunSimulation} className="col-span-2 bg-slate-800 hover:bg-slate-900 text-white font-medium py-2 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors text-sm shadow-sm">
                     <Play className="w-4 h-4" /> Run Simulation
                   </button>
                   <button className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-medium py-2 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors text-sm shadow-sm">
@@ -194,8 +191,32 @@ export default function PipelineDeck() {
 
               <section className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 min-h-[200px] flex flex-col">
                 <h2 className="text-lg font-semibold mb-4 text-slate-800">Detected Hazards</h2>
-                <div className="flex-1 flex items-center justify-center border-2 border-dashed border-slate-200 rounded-xl bg-slate-50/50">
-                  <p className="text-slate-400 text-sm font-medium">Simulation output will appear here</p>
+                <div className="flex-1 flex flex-col border-2 border-dashed border-slate-200 rounded-xl bg-slate-50/50 p-4 overflow-y-auto max-h-[200px] scrollbar-thin scrollbar-thumb-slate-200">
+                  {hazards === null ? (
+                    <div className="flex-1 flex items-center justify-center">
+                      <p className="text-slate-400 text-sm font-medium">Simulation output will appear here</p>
+                    </div>
+                  ) : hazards.length === 0 ? (
+                    <div className="flex-1 flex items-center justify-center">
+                      <p className="text-emerald-600 text-sm font-medium flex items-center gap-2">
+                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        </svg>
+                        No hazards detected
+                      </p>
+                    </div>
+                  ) : (
+                    <ul className="space-y-2">
+                      {hazards.map((hazard, index) => (
+                        <li key={index} className="flex items-center gap-2 text-sm font-medium text-amber-700 bg-amber-50 p-3 rounded-lg border border-amber-200">
+                          <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                          </svg>
+                          RAW Hazard: {hazard.from} → {hazard.to} on {hazard.register}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               </section>
             </div>
