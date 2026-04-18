@@ -124,78 +124,204 @@ export interface PipelineExecutionRow {
   cells: string[];
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Forwarding helpers
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Returns true if this instruction type produces its result after the EX stage.
+ * LW produces at MEM; everything else (ADD, SUB) produces at EX.
+ */
+function producesAtMEM(type: InstructionType): boolean {
+  return type === "LW";
+}
+
+/**
+ * Returns true if the consumer instruction needs its source data by the EX stage.
+ * SW needs data by MEM (for the value being stored), not EX.
+ * ADD/SUB/LW need sources at EX.
+ *
+ * Note: for the base-address register of LW/SW we always need it at EX
+ * (address calculation). Only the *data* register of SW is needed at MEM.
+ * We pass isDataReg=true only for SW's src1 (the value to store).
+ */
+function neededAtMEM(consumerType: InstructionType, isDataReg: boolean): boolean {
+  return consumerType === "SW" && isDataReg;
+}
+
+/**
+ * Compute the minimum number of stalls required for one dependency edge
+ * (producer instruction producing `producerType`,  consumer instruction of
+ * `consumerType`) given the current scheduling state.
+ *
+ * @param producerType  - type of the producing instruction
+ * @param consumerType  - type of the consuming instruction
+ * @param isDataReg     - true when the consumed register is the SW data register
+ *                        (src1), not a base-address register
+ * @param exCycleOfProducer - the 0-based cycle index in which producer reaches EX
+ * @param exCycleOfConsumer - the 0-based cycle index in which consumer would
+ *                            reach EX if zero stalls are added
+ * @param forwarding    - whether data forwarding is enabled
+ * @param stages        - pipeline stage array (needed to find MEM offset from EX)
+ */
+function computeStallsNeeded(
+  producerType: InstructionType,
+  consumerType: InstructionType,
+  isDataReg: boolean,
+  exCycleOfProducer: number,
+  exCycleOfConsumer: number,
+  forwarding: boolean,
+  stages: string[]
+): number {
+  // With forwarding disabled the consumer can only start EX once the producer
+  // has completed WB (same-cycle WB→ID assumption means WB cycle == ready cycle).
+  // WB is the last stage; its 0-based offset from EX = stages.length − 1 − 2 = stages.length − 3
+  // (stages[0]=IF, stages[1]=ID, stages[2]=EX, …)
+  const stagesAfterEX = stages.length - 3; // number of stages after EX (MEM, WB etc.)
+  const wbOffsetFromEX = stagesAfterEX;    // cycles after EX that WB occurs
+
+  // Cycle at which producer completes WB (same-cycle assumption: available same cycle)
+  const producerWBCycle = exCycleOfProducer + wbOffsetFromEX;
+
+  if (!forwarding) {
+    // No forwarding: consumer's EX must be >= producerWBCycle
+    const stallsNeeded = producerWBCycle - exCycleOfConsumer;
+    return Math.max(0, stallsNeeded);
+  }
+
+  // ── Forwarding enabled ─────────────────────────────────────────────────────
+
+  // Determine when the producer's result is *available* for forwarding.
+  // ADD/SUB → result is ready at the *end* of EX  → forwardable *into* EX of consumer
+  // LW      → result is ready at the *end* of MEM → forwardable *into* EX (or MEM) of consumer
+  const memOffsetFromEX = 1; // MEM is 1 cycle after EX (in both 4- and 5-stage)
+  const producerForwardReadyCycle = producesAtMEM(producerType)
+    ? exCycleOfProducer + memOffsetFromEX  // LW: result ready after MEM
+    : exCycleOfProducer;                   // ALU: result ready after EX (end-of-cycle)
+
+  // Determine which cycle the consumer *needs* the data.
+  const consumerNeedsAtMEM = neededAtMEM(consumerType, isDataReg);
+  const consumerNeedsCycle = consumerNeedsAtMEM
+    ? exCycleOfConsumer + memOffsetFromEX  // SW data reg: needed at MEM
+    : exCycleOfConsumer;                   // all others: needed at EX
+
+  // Stalls = how many cycles we must push the consumer so that
+  //          producerForwardReadyCycle <= consumerNeedsCycle
+  const stallsNeeded = producerForwardReadyCycle - consumerNeedsCycle;
+  return Math.max(0, stallsNeeded);
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Main pipeline generator
+// ──────────────────────────────────────────────────────────────────────────────
+
 /**
  * Generates a cycle-by-cycle execution table for the given instructions.
- * Introduces STALL states for Read-After-Write hazards without forwarding.
+ *
+ * When forwardingEnabled=false → stall until WB (conservative).
+ * When forwardingEnabled=true  → apply forwarding rules to minimise stalls:
+ *   Case A  ALU → ALU : 0 stalls  (EX→EX forward)
+ *   Case B  LW  → ALU : 1 stall   (MEM→EX forward, load-use hazard)
+ *   Case C  ALU → SW  : 0 stalls  (EX→MEM forward for data reg)
+ *   Case D  LW  → SW  : 0 stalls  (MEM→MEM forward; timing works out)
  */
 export function generatePipeline(
-  parsedInstructions: ParsedInstruction[], 
+  parsedInstructions: ParsedInstruction[],
   pipelineType: "4-stage" | "5-stage",
-  hazards: Hazard[]
+  hazards: Hazard[],
+  forwardingEnabled: boolean = false
 ): PipelineExecutionRow[] {
-  const stages = pipelineType === "5-stage" 
-    ? ["IF", "ID", "EX", "MEM", "WB"] 
+  const stages = pipelineType === "5-stage"
+    ? ["IF", "ID", "EX", "MEM", "WB"]
     : ["IF", "ID", "EX", "MEM/WB"];
-  
+
   const executionTable: PipelineExecutionRow[] = [];
-  
-  // Track which cycle a register is written. Maps register name to 0-based cycle index.
-  const registerReadyCycle: Record<string, number> = {};
+
+  // Track per-register: the EX cycle of the instruction that last wrote it,
+  // plus the type of that instruction (so we know ALU vs LW for forwarding).
+  interface RegInfo {
+    exCycle: number;      // 0-based cycle when producer started EX
+    wbCycle: number;      // 0-based cycle when producer completed WB
+    type: InstructionType;
+  }
+  const registerInfo: Record<string, RegInfo> = {};
 
   for (let i = 0; i < parsedInstructions.length; i++) {
     const inst = parsedInstructions[i];
     const cells: string[] = [];
-    
-    // First inst starts at cycle index 0, subsequent start consecutive
-    const startCycle = i;
-    
-    // Pad empty cycles before instruction start
-    for (let c = 0; c < startCycle; c++) {
-      cells.push("");
-    }
-    
-    // IF Stage
+
+    // Instruction i's IF starts at cycle i (0-based)
+    const ifCycle = i;
+
+    // Pad empty columns before IF
+    for (let c = 0; c < ifCycle; c++) cells.push("");
+
+    // IF Stage (cycle: ifCycle)
     cells.push("IF");
-    let currentCycle = startCycle + 1; // Expected cycle for ID stage
-    
-    let requiredReadyCycle = -1;
-    
-    // Check RAW hazards for strictly this instruction
+
+    // ID normally follows IF
+    let idCycle = ifCycle + 1;
+
+    // EX would normally follow ID with no stalls
+    let exCycle = idCycle + 1;
+
+    // ── Compute total stalls for this instruction ────────────────────────────
+    // Gather all RAW hazards that affect this instruction and find the maximum
+    // number of stalls forced by any single dependency.
     const instHazards = hazards.filter(h => h.to === inst.id);
+    let maxStalls = 0;
+
     for (const hazard of instHazards) {
-      if (registerReadyCycle[hazard.register] !== undefined) {
-        requiredReadyCycle = Math.max(requiredReadyCycle, registerReadyCycle[hazard.register]);
-      }
+      const info = registerInfo[hazard.register];
+      if (!info) continue; // producer not yet scheduled (shouldn't happen)
+
+      // Is this register SW's *data* operand (src1) rather than a base address?
+      // SW uses: src1 = data register to store, base = address register.
+      const isDataReg =
+        inst.type === "SW" && inst.src1 === hazard.register;
+
+      const stalls = computeStallsNeeded(
+        info.type,
+        inst.type,
+        isDataReg,
+        info.exCycle,
+        exCycle,        // consumer EX with zero extra stalls
+        forwardingEnabled,
+        stages
+      );
+
+      maxStalls = Math.max(maxStalls, stalls);
     }
-    
-    // Insert stalls if resolving in the same cycle (ID in second half, WB in first half)
-    while (currentCycle < requiredReadyCycle) {
-      cells.push("STALL");
-      currentCycle++;
-    }
-    
-    // ID Stage
+
+    // ── Build cell array ─────────────────────────────────────────────────────
+    // ID is written first, then stalls, then EX and beyond.
     cells.push("ID");
-    currentCycle++; // Cycle for EX stage
-    
-    // Execute remaining stages
-    for (let s = 2; s < stages.length; s++) { // start at EX
+
+    for (let s = 0; s < maxStalls; s++) cells.push("STALL");
+
+    // Actual EX cycle after stalls
+    exCycle = idCycle + 1 + maxStalls;
+    let currentCycle = exCycle;
+
+    // EX + remaining stages
+    for (let s = 2; s < stages.length; s++) {
       cells.push(stages[s]);
-      
-      // Mark register as written and readable at the current cycle
+
+      // When the instruction writes its destination, record info for forwarding
       if (stages[s] === "WB" || stages[s] === "MEM/WB") {
         if (inst.dest && inst.dest.trim() !== "") {
-          registerReadyCycle[inst.dest] = currentCycle;
+          registerInfo[inst.dest] = {
+            exCycle,
+            wbCycle: currentCycle,
+            type: inst.type,
+          };
         }
       }
-      
+
       currentCycle++;
     }
-    
-    executionTable.push({
-      instructionId: inst.id,
-      cells
-    });
+
+    executionTable.push({ instructionId: inst.id, cells });
   }
 
   return executionTable;

@@ -38,7 +38,7 @@ export default function PipelineDeck() {
     const detectedHazards = detectRAW(parsed);
     setHazards(detectedHazards);
     
-    const executionData = generatePipeline(parsed, pipelineType, detectedHazards);
+    const executionData = generatePipeline(parsed, pipelineType, detectedHazards, forwardingEnabled);
     setPipelineData(executionData);
   };
 
