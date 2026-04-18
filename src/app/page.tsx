@@ -186,81 +186,127 @@ export default function PipelineDeck() {
 
             {/* Output Placeholders */}
             <div className="grid grid-cols-1 gap-8">
-              <section className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 min-h-[250px] flex flex-col overflow-hidden">
-                <h2 className="text-lg font-semibold mb-4 text-slate-800">Pipeline Execution Table</h2>
-                <div className="flex-1 w-full overflow-x-auto border-2 border-slate-200 rounded-xl bg-slate-50/50">
-                  {pipelineData === null ? (
-                    <div className="h-full flex items-center justify-center p-8 border-dashed border-2 m-[-2px] border-slate-200 rounded-xl">
-                      <p className="text-slate-400 text-sm font-medium">Simulation output will appear here</p>
+
+              {/* ── Pipeline Execution Table ─────────────────────────── */}
+              <section className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 flex flex-col overflow-hidden">
+                <h2 className="text-lg font-semibold mb-1 text-slate-800">Pipeline Execution Table</h2>
+
+                {pipelineData === null ? (
+                  <div className="mt-4 flex-1 flex items-center justify-center border-2 border-dashed border-slate-200 rounded-xl bg-slate-50/50 py-12">
+                    <p className="text-slate-400 text-sm font-medium">Run simulation to view pipeline execution</p>
+                  </div>
+                ) : (
+                  <>
+                    {/* Legend */}
+                    <div className="flex flex-wrap gap-2 mt-3 mb-4 text-[0.72rem] font-semibold">
+                      {[
+                        { label: "IF",    bg: "bg-blue-100",   text: "text-blue-700"   },
+                        { label: "ID",    bg: "bg-purple-100", text: "text-purple-700" },
+                        { label: "EX",    bg: "bg-green-100",  text: "text-green-700"  },
+                        { label: "MEM",   bg: "bg-yellow-100", text: "text-yellow-700" },
+                        { label: "WB",    bg: "bg-pink-100",   text: "text-pink-700"   },
+                        { label: "STALL", bg: "bg-red-100",    text: "text-red-700"    },
+                      ].map(({ label, bg, text }) => (
+                        <span key={label} className={`${bg} ${text} px-2.5 py-1 rounded-full`}>
+                          {label}
+                        </span>
+                      ))}
                     </div>
-                  ) : (
-                    <table className="w-full text-sm text-left border-collapse min-w-max">
-                      <thead>
-                        <tr className="bg-slate-100 border-b border-slate-200 text-slate-600 font-medium">
-                          <th className="px-4 py-3 border-r border-slate-200 sticky left-0 bg-slate-100 z-10 w-16">Inst</th>
-                          {Array.from({ length: Math.max(...pipelineData.map(row => row.cells.length)) }).map((_, i) => (
-                            <th key={i} className="px-4 py-3 min-w-[50px] text-center border-r border-slate-200">C{i + 1}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {pipelineData.map((row, i) => (
-                          <tr key={i} className="border-b border-slate-200 hover:bg-white transition-colors bg-slate-50/50">
-                            <td className="px-4 py-3 font-bold text-slate-700 border-r border-slate-200 sticky left-0 bg-slate-50 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] z-10">
-                              {row.instructionId}
-                            </td>
-                            {row.cells.map((cell, j) => (
-                              <td key={j} className="px-2 py-3 text-center font-medium border-r border-slate-200 border-dashed">
-                                {cell === "STALL" ? (
-                                  <span className="text-red-500 bg-red-50 px-2 py-1 rounded inline-block min-w-[3rem] text-[0.8rem]">STALL</span>
-                                ) : cell ? (
-                                  <span className="text-blue-600 bg-blue-50 px-2 py-1 rounded inline-block min-w-[3rem] text-[0.8rem]">{cell}</span>
-                                ) : (
-                                  ""
-                                )}
-                              </td>
-                            ))}
-                            {/* Pad empty cells dynamically */}
-                            {Array.from({ length: Math.max(...pipelineData.map(r => r.cells.length)) - row.cells.length }).map((_, j) => (
-                              <td key={`empty-${j}`} className="px-2 py-3 border-r border-slate-200 border-dashed"></td>
+
+                    {/* Table */}
+                    <div className="w-full overflow-x-auto rounded-xl border border-slate-200">
+                      <table className="border-collapse min-w-max w-full text-[0.78rem]">
+                        <thead>
+                          <tr className="bg-slate-100 text-slate-600 font-semibold">
+                            <th className="px-4 py-2.5 border border-slate-200 text-left sticky left-0 bg-slate-100 z-10 min-w-[90px]">
+                              Instruction
+                            </th>
+                            {Array.from({ length: Math.max(...pipelineData.map(r => r.cells.length)) }).map((_, i) => (
+                              <th key={i} className="px-3 py-2.5 border border-slate-200 text-center min-w-[54px]">
+                                C{i + 1}
+                              </th>
                             ))}
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  )}
-                </div>
+                        </thead>
+                        <tbody>
+                          {pipelineData.map((row, ri) => {
+                            const maxLen = Math.max(...pipelineData.map(r => r.cells.length));
+                            return (
+                              <tr key={ri} className="group hover:brightness-95 transition-all">
+                                {/* Instruction label */}
+                                <td className="px-4 py-2 border border-slate-200 font-bold text-slate-700 sticky left-0 bg-white z-10 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.08)]">
+                                  {row.instructionId}
+                                </td>
+
+                                {/* Stage cells */}
+                                {row.cells.map((cell, ci) => {
+                                  const style = (() => {
+                                    switch (cell) {
+                                      case "IF":      return "bg-blue-50   text-blue-700   border-blue-200";
+                                      case "ID":      return "bg-purple-50 text-purple-700 border-purple-200";
+                                      case "EX":      return "bg-green-50  text-green-700  border-green-200";
+                                      case "MEM":
+                                      case "MEM/WB":  return "bg-yellow-50 text-yellow-700 border-yellow-200";
+                                      case "WB":      return "bg-pink-50   text-pink-700   border-pink-200";
+                                      case "STALL":   return "bg-red-100   text-red-700    border-red-300";
+                                      default:        return "bg-slate-50  text-slate-300  border-slate-200";
+                                    }
+                                  })();
+                                  return (
+                                    <td key={ci} className={`border px-2 py-2 text-center font-semibold ${style}`}>
+                                      {cell || "·"}
+                                    </td>
+                                  );
+                                })}
+
+                                {/* Trailing empty cells to align rows */}
+                                {Array.from({ length: maxLen - row.cells.length }).map((_, ei) => (
+                                  <td key={`e-${ei}`} className="border border-slate-100 bg-slate-50 px-2 py-2 text-center text-slate-200 font-semibold">·</td>
+                                ))}
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
               </section>
 
-              <section className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 min-h-[200px] flex flex-col">
+              {/* ── Detected Hazards ─────────────────────────────────── */}
+              <section className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 flex flex-col">
                 <h2 className="text-lg font-semibold mb-4 text-slate-800">Detected Hazards</h2>
-                <div className="flex-1 flex flex-col border-2 border-dashed border-slate-200 rounded-xl bg-slate-50/50 p-4 overflow-y-auto max-h-[200px] scrollbar-thin scrollbar-thumb-slate-200">
-                  {hazards === null ? (
-                    <div className="flex-1 flex items-center justify-center">
-                      <p className="text-slate-400 text-sm font-medium">Simulation output will appear here</p>
-                    </div>
-                  ) : hazards.length === 0 ? (
-                    <div className="flex-1 flex items-center justify-center">
-                      <p className="text-emerald-600 text-sm font-medium flex items-center gap-2">
-                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+
+                {hazards === null ? (
+                  <div className="flex-1 flex items-center justify-center border-2 border-dashed border-slate-200 rounded-xl bg-slate-50/50 py-10">
+                    <p className="text-slate-400 text-sm font-medium">Run simulation to view pipeline execution</p>
+                  </div>
+                ) : hazards.length === 0 ? (
+                  <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
+                    <svg className="w-5 h-5 text-emerald-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    <span className="text-emerald-700 text-sm font-semibold">No hazards detected — clean pipeline!</span>
+                  </div>
+                ) : (
+                  <ul className="space-y-2">
+                    {hazards.map((hazard, index) => (
+                      <li key={index} className="flex items-start gap-3 bg-amber-50 border border-amber-200 px-4 py-3 rounded-xl hover:bg-amber-100 transition-colors">
+                        <svg className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                         </svg>
-                        No hazards detected
-                      </p>
-                    </div>
-                  ) : (
-                    <ul className="space-y-2">
-                      {hazards.map((hazard, index) => (
-                        <li key={index} className="flex items-center gap-2 text-sm font-medium text-amber-700 bg-amber-50 p-3 rounded-lg border border-amber-200">
-                          <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                          </svg>
-                          RAW Hazard: {hazard.from} → {hazard.to} on {hazard.register}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
+                        <span className="text-sm text-amber-800">
+                          <span className="font-bold">RAW Hazard:</span>{" "}
+                          <span className="font-semibold text-amber-900">{hazard.from}</span>
+                          {" → "}
+                          <span className="font-semibold text-amber-900">{hazard.to}</span>
+                          {" on "}
+                          <span className="font-mono font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded">{hazard.register}</span>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </section>
             </div>
 
