@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Play, StepForward, RotateCcw, Plus, Calculator, Server } from "lucide-react";
+import { useState, useRef, useEffect } from "react";
+import { Play, StepForward, RotateCcw, Plus, Calculator, Server, Pause } from "lucide-react";
 import { RawInstruction, Hazard, PipelineExecutionRow, InstructionType, parseInstructions, detectRAW, generatePipeline } from "@/lib/hazardDetection";
 
 export default function PipelineDeck() {
@@ -10,7 +10,38 @@ export default function PipelineDeck() {
   const [pipelineType, setPipelineType] = useState<"4-stage" | "5-stage">("5-stage");
   const [forwardingEnabled, setForwardingEnabled] = useState<boolean>(true);
   const [hazards, setHazards] = useState<Hazard[] | null>(null);
-  const [pipelineData, setPipelineData] = useState<PipelineExecutionRow[] | null>(null);
+
+  // Full computed table (never changes between steps)
+  const [fullPipelineTable, setFullPipelineTable] = useState<PipelineExecutionRow[] | null>(null);
+  // How many cycle columns are currently revealed
+  const [currentCycle, setCurrentCycle] = useState<number>(0);
+  // Whether auto-play is running
+  const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  // Ref to the auto-play interval so we can clear it
+  const playIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Derived: max number of cycle columns across all rows
+  const maxCycles = fullPipelineTable
+    ? Math.max(...fullPipelineTable.map(r => r.cells.length))
+    : 0;
+
+  // Derived display table: slice each row's cells to currentCycle
+  // (no recomputation of pipeline logic — just a visibility slice)
+  const pipelineData: PipelineExecutionRow[] | null = fullPipelineTable
+    ? fullPipelineTable.map(row => ({ ...row, cells: row.cells.slice(0, currentCycle) }))
+    : null;
+
+  // Stop auto-play helper
+  const stopPlay = () => {
+    if (playIntervalRef.current) {
+      clearInterval(playIntervalRef.current);
+      playIntervalRef.current = null;
+    }
+    setIsPlaying(false);
+  };
+
+  // Clean up interval on unmount
+  useEffect(() => () => stopPlay(), []);
 
   const generateInstructions = () => {
     const num = parseInt(numInstructionsInput);
@@ -33,14 +64,56 @@ export default function PipelineDeck() {
     setInstructions(instructions.map(inst => inst.id === id ? { ...inst, [field]: value } : inst));
   };
 
+  // Run Simulation: compute the full table, reveal only cycle 1
   const handleRunSimulation = () => {
+    stopPlay();
     const parsed = parseInstructions(instructions);
     const detectedHazards = detectRAW(parsed);
     setHazards(detectedHazards);
-    
     const executionData = generatePipeline(parsed, pipelineType, detectedHazards, forwardingEnabled);
-    setPipelineData(executionData);
+    setFullPipelineTable(executionData);
+    setCurrentCycle(1); // reveal just the first column
   };
+
+  // Step: reveal one more cycle
+  const handleStep = () => {
+    setCurrentCycle(prev => {
+      const next = prev + 1;
+      if (next >= maxCycles) stopPlay();
+      return Math.min(next, maxCycles);
+    });
+  };
+
+  // Reset: clear everything
+  const handleReset = () => {
+    stopPlay();
+    setFullPipelineTable(null);
+    setCurrentCycle(0);
+    setHazards(null);
+  };
+
+  // Toggle auto-play
+  const handleTogglePlay = () => {
+    if (isPlaying) {
+      stopPlay();
+    } else {
+      if (!fullPipelineTable || currentCycle >= maxCycles) return;
+      setIsPlaying(true);
+      playIntervalRef.current = setInterval(() => {
+        setCurrentCycle(prev => {
+          const next = prev + 1;
+          if (next >= maxCycles) {
+            // Stop after this last increment
+            if (playIntervalRef.current) clearInterval(playIntervalRef.current);
+            playIntervalRef.current = null;
+            setIsPlaying(false);
+          }
+          return Math.min(next, maxCycles);
+        });
+      }, 650);
+    }
+  };
+
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900 py-10 px-4 sm:px-6 lg:px-8 font-sans">
@@ -116,16 +189,60 @@ export default function PipelineDeck() {
                   <span className="text-sm font-medium text-slate-700 select-none">Enable Forwarding</span>
                 </label>
 
-                <div className="pt-2 grid grid-cols-2 gap-2">
-                  <button onClick={handleRunSimulation} className="col-span-2 bg-slate-800 hover:bg-slate-900 text-white font-medium py-2 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors text-sm shadow-sm">
+                <div className="pt-2 space-y-2">
+                  {/* Cycle indicator */}
+                  {fullPipelineTable && (
+                    <div className="flex items-center justify-between text-xs font-medium text-slate-500 bg-slate-50 rounded-lg px-3 py-2 border border-slate-200">
+                      <span>Cycle</span>
+                      <span className="font-mono font-bold text-slate-800">
+                        {currentCycle === 0 ? "—" : `${currentCycle} / ${maxCycles}`}
+                      </span>
+                    </div>
+                  )}
+                  {/* Run */}
+                  <button
+                    onClick={handleRunSimulation}
+                    className="w-full bg-slate-800 hover:bg-slate-900 text-white font-medium py-2 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors text-sm shadow-sm"
+                  >
                     <Play className="w-4 h-4" /> Run Simulation
                   </button>
-                  <button className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-medium py-2 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors text-sm shadow-sm">
-                    <StepForward className="w-4 h-4" /> Step
-                  </button>
-                  <button className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-medium py-2 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors text-sm shadow-sm">
+                  {/* Step + Play row */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={handleStep}
+                      disabled={!fullPipelineTable || currentCycle >= maxCycles}
+                      className="bg-blue-50 border border-blue-200 hover:bg-blue-100 text-blue-700 font-medium py-2 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <StepForward className="w-4 h-4" /> Step
+                    </button>
+                    <button
+                      onClick={handleTogglePlay}
+                      disabled={!fullPipelineTable || (currentCycle >= maxCycles && !isPlaying)}
+                      className={`border font-medium py-2 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors text-sm disabled:opacity-40 disabled:cursor-not-allowed ${
+                        isPlaying
+                          ? "bg-amber-50 border-amber-200 hover:bg-amber-100 text-amber-700"
+                          : "bg-emerald-50 border-emerald-200 hover:bg-emerald-100 text-emerald-700"
+                      }`}
+                    >
+                      {isPlaying ? <><Pause className="w-4 h-4" /> Pause</> : <><Play className="w-4 h-4" /> Auto</>}
+                    </button>
+                  </div>
+                  {/* Reset */}
+                  <button
+                    onClick={handleReset}
+                    className="w-full bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-medium py-2 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors text-sm"
+                  >
                     <RotateCcw className="w-4 h-4" /> Reset
                   </button>
+                  {/* Completion badge */}
+                  {fullPipelineTable && currentCycle >= maxCycles && (
+                    <div className="flex items-center justify-center gap-1.5 text-xs text-emerald-700 font-semibold bg-emerald-50 border border-emerald-200 rounded-lg py-1.5">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                      </svg>
+                      Simulation Complete
+                    </div>
+                  )}
                 </div>
               </div>
             </section>
