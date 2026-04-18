@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Play, StepForward, RotateCcw, Plus, Calculator, Server } from "lucide-react";
-import { RawInstruction, Hazard, InstructionType, parseInstructions, detectRAW } from "@/lib/hazardDetection";
+import { RawInstruction, Hazard, PipelineExecutionRow, InstructionType, parseInstructions, detectRAW, generatePipeline } from "@/lib/hazardDetection";
 
 export default function PipelineDeck() {
   const [numInstructionsInput, setNumInstructionsInput] = useState<string>("5");
@@ -10,6 +10,7 @@ export default function PipelineDeck() {
   const [pipelineType, setPipelineType] = useState<"4-stage" | "5-stage">("5-stage");
   const [forwardingEnabled, setForwardingEnabled] = useState<boolean>(true);
   const [hazards, setHazards] = useState<Hazard[] | null>(null);
+  const [pipelineData, setPipelineData] = useState<PipelineExecutionRow[] | null>(null);
 
   const generateInstructions = () => {
     const num = parseInt(numInstructionsInput);
@@ -36,6 +37,9 @@ export default function PipelineDeck() {
     const parsed = parseInstructions(instructions);
     const detectedHazards = detectRAW(parsed);
     setHazards(detectedHazards);
+    
+    const executionData = generatePipeline(parsed, pipelineType, detectedHazards);
+    setPipelineData(executionData);
   };
 
   return (
@@ -182,10 +186,49 @@ export default function PipelineDeck() {
 
             {/* Output Placeholders */}
             <div className="grid grid-cols-1 gap-8">
-              <section className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 min-h-[250px] flex flex-col">
+              <section className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 min-h-[250px] flex flex-col overflow-hidden">
                 <h2 className="text-lg font-semibold mb-4 text-slate-800">Pipeline Execution Table</h2>
-                <div className="flex-1 flex items-center justify-center border-2 border-dashed border-slate-200 rounded-xl bg-slate-50/50">
-                  <p className="text-slate-400 text-sm font-medium">Simulation output will appear here</p>
+                <div className="flex-1 w-full overflow-x-auto border-2 border-slate-200 rounded-xl bg-slate-50/50">
+                  {pipelineData === null ? (
+                    <div className="h-full flex items-center justify-center p-8 border-dashed border-2 m-[-2px] border-slate-200 rounded-xl">
+                      <p className="text-slate-400 text-sm font-medium">Simulation output will appear here</p>
+                    </div>
+                  ) : (
+                    <table className="w-full text-sm text-left border-collapse min-w-max">
+                      <thead>
+                        <tr className="bg-slate-100 border-b border-slate-200 text-slate-600 font-medium">
+                          <th className="px-4 py-3 border-r border-slate-200 sticky left-0 bg-slate-100 z-10 w-16">Inst</th>
+                          {Array.from({ length: Math.max(...pipelineData.map(row => row.cells.length)) }).map((_, i) => (
+                            <th key={i} className="px-4 py-3 min-w-[50px] text-center border-r border-slate-200">C{i + 1}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {pipelineData.map((row, i) => (
+                          <tr key={i} className="border-b border-slate-200 hover:bg-white transition-colors bg-slate-50/50">
+                            <td className="px-4 py-3 font-bold text-slate-700 border-r border-slate-200 sticky left-0 bg-slate-50 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] z-10">
+                              {row.instructionId}
+                            </td>
+                            {row.cells.map((cell, j) => (
+                              <td key={j} className="px-2 py-3 text-center font-medium border-r border-slate-200 border-dashed">
+                                {cell === "STALL" ? (
+                                  <span className="text-red-500 bg-red-50 px-2 py-1 rounded inline-block min-w-[3rem] text-[0.8rem]">STALL</span>
+                                ) : cell ? (
+                                  <span className="text-blue-600 bg-blue-50 px-2 py-1 rounded inline-block min-w-[3rem] text-[0.8rem]">{cell}</span>
+                                ) : (
+                                  ""
+                                )}
+                              </td>
+                            ))}
+                            {/* Pad empty cells dynamically */}
+                            {Array.from({ length: Math.max(...pipelineData.map(r => r.cells.length)) - row.cells.length }).map((_, j) => (
+                              <td key={`empty-${j}`} className="px-2 py-3 border-r border-slate-200 border-dashed"></td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
                 </div>
               </section>
 

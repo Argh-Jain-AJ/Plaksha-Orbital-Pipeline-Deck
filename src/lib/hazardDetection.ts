@@ -118,3 +118,85 @@ export function detectRAW(parsedInstructions: ParsedInstruction[]): Hazard[] {
 
   return hazards;
 }
+
+export interface PipelineExecutionRow {
+  instructionId: string;
+  cells: string[];
+}
+
+/**
+ * Generates a cycle-by-cycle execution table for the given instructions.
+ * Introduces STALL states for Read-After-Write hazards without forwarding.
+ */
+export function generatePipeline(
+  parsedInstructions: ParsedInstruction[], 
+  pipelineType: "4-stage" | "5-stage",
+  hazards: Hazard[]
+): PipelineExecutionRow[] {
+  const stages = pipelineType === "5-stage" 
+    ? ["IF", "ID", "EX", "MEM", "WB"] 
+    : ["IF", "ID", "EX", "MEM/WB"];
+  
+  const executionTable: PipelineExecutionRow[] = [];
+  
+  // Track which cycle a register is written. Maps register name to 0-based cycle index.
+  const registerReadyCycle: Record<string, number> = {};
+
+  for (let i = 0; i < parsedInstructions.length; i++) {
+    const inst = parsedInstructions[i];
+    const cells: string[] = [];
+    
+    // First inst starts at cycle index 0, subsequent start consecutive
+    const startCycle = i;
+    
+    // Pad empty cycles before instruction start
+    for (let c = 0; c < startCycle; c++) {
+      cells.push("");
+    }
+    
+    // IF Stage
+    cells.push("IF");
+    let currentCycle = startCycle + 1; // Expected cycle for ID stage
+    
+    let requiredReadyCycle = -1;
+    
+    // Check RAW hazards for strictly this instruction
+    const instHazards = hazards.filter(h => h.to === inst.id);
+    for (const hazard of instHazards) {
+      if (registerReadyCycle[hazard.register] !== undefined) {
+        requiredReadyCycle = Math.max(requiredReadyCycle, registerReadyCycle[hazard.register]);
+      }
+    }
+    
+    // Insert stalls if resolving in the same cycle (ID in second half, WB in first half)
+    while (currentCycle < requiredReadyCycle) {
+      cells.push("STALL");
+      currentCycle++;
+    }
+    
+    // ID Stage
+    cells.push("ID");
+    currentCycle++; // Cycle for EX stage
+    
+    // Execute remaining stages
+    for (let s = 2; s < stages.length; s++) { // start at EX
+      cells.push(stages[s]);
+      
+      // Mark register as written and readable at the current cycle
+      if (stages[s] === "WB" || stages[s] === "MEM/WB") {
+        if (inst.dest && inst.dest.trim() !== "") {
+          registerReadyCycle[inst.dest] = currentCycle;
+        }
+      }
+      
+      currentCycle++;
+    }
+    
+    executionTable.push({
+      instructionId: inst.id,
+      cells
+    });
+  }
+
+  return executionTable;
+}
