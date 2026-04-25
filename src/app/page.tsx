@@ -272,12 +272,13 @@ export default function PipelineDeck() {
                       >
                         <option value="ADD">ADD</option>
                         <option value="SUB">SUB</option>
+                        <option value="AND">AND</option>
                         <option value="LW">LW</option>
                         <option value="SW">SW</option>
                       </select>
 
                       <div className="flex-1 flex gap-2">
-                        {['ADD', 'SUB'].includes(inst.type) ? (
+                        {['ADD', 'SUB', 'AND'].includes(inst.type) ? (
                           <>
                             <input type="text" placeholder="Dest (R1)" value={inst.rd} onChange={(e) => updateInstruction(inst.id, 'rd', e.target.value)} className="w-full px-3 py-1.5 border border-slate-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-sm bg-white uppercase font-mono" />
                             <input type="text" placeholder="Src1 (R2)" value={inst.rs1} onChange={(e) => updateInstruction(inst.id, 'rs1', e.target.value)} className="w-full px-3 py-1.5 border border-slate-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-sm bg-white uppercase font-mono" />
@@ -285,11 +286,11 @@ export default function PipelineDeck() {
                           </>
                         ) : (
                           <>
-                            <input type="text" placeholder={inst.type === 'LW' ? 'Dest (R1)' : 'Src (R1)'} value={inst.rd} onChange={(e) => updateInstruction(inst.id, 'rd', e.target.value)} className="w-full px-3 py-1.5 border border-slate-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-sm bg-white uppercase font-mono" />
-                            <div className="flex items-center gap-1 w-full flex-2">
+                            <input type="text" placeholder={inst.type === 'LW' ? 'Dest (R1)' : 'Src (R1)'} value={inst.rd} onChange={(e) => updateInstruction(inst.id, 'rd', e.target.value)} className="w-32 px-3 py-1.5 border border-slate-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-sm bg-white uppercase font-mono" />
+                            <div className="flex items-center gap-1 flex-1 min-w-0">
                               <input type="text" placeholder="Off (0)" value={inst.offset} onChange={(e) => updateInstruction(inst.id, 'offset', e.target.value)} className="w-16 px-3 py-1.5 border border-slate-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-sm bg-white font-mono" />
                               <span className="text-slate-400 font-mono">(</span>
-                              <input type="text" placeholder="Base (R2)" value={inst.rs1} onChange={(e) => updateInstruction(inst.id, 'rs1', e.target.value)} className="w-full px-3 py-1.5 border border-slate-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-sm bg-white uppercase font-mono" />
+                              <input type="text" placeholder="Base (R2)" value={inst.rs1} onChange={(e) => updateInstruction(inst.id, 'rs1', e.target.value)} className="flex-1 px-3 py-1.5 border border-slate-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-sm bg-white uppercase font-mono min-w-[60px]" />
                               <span className="text-slate-400 font-mono">)</span>
                             </div>
                           </>
